@@ -85,27 +85,46 @@ def normalize_number(text: str) -> float:
     Returns:
         Normalized float, or None if no number found
     """
+    # [VALIDATOR FIX - Attempt 1]
+    # [PROBLEM]: Numbers are being multiplied by 1000 incorrectly (e.g., 34 → 34000)
+    # [CAUSE]: The "k" suffix handler applies to any "k" in the text, not just when "k" directly follows a number
+    # [FIX]: Only apply "k" multiplier when "k" is directly attached to a number (e.g., "34k" not "34 kilometers")
+    #
+    # [OLD CODE]:
+    # if "k" in text.lower():
+    #     text = text.lower().replace("k", "")
+    #     multiplier = 1000
+    # else:
+    #     multiplier = 1
+    # numbers = re.findall(r"-?\d+\.?\d*", text)
+    # if numbers:
+    #     try:
+    #         return float(numbers[-1].replace(",", "")) * multiplier
+    #
+    # [NEW CODE]:
     if text is None:
         return None
 
     # Remove common symbols and whitespace
     text = str(text).strip()
 
-    # Remove currency symbols, percent signs, etc.
+    # Remove currency symbols and percent signs
     text = re.sub(r"[$,%]", "", text)
 
-    # Handle "k" suffix (thousands)
-    if "k" in text.lower():
-        text = text.lower().replace("k", "")
-        multiplier = 1000
-    else:
-        multiplier = 1
+    # First, try to find a number with "k" suffix directly attached (e.g., "34k", "5.5k")
+    k_pattern = re.search(r"(\d+(?:\.\d+)?)\s*k\b", text, re.IGNORECASE)
+    if k_pattern:
+        try:
+            return float(k_pattern.group(1)) * 1000
+        except ValueError:
+            pass
 
-    # Extract the last number (most likely to be the final answer)
-    numbers = re.findall(r"-?\d+\.?\d*", text)
+    # Extract all numbers (including decimals and negatives) with optional commas
+    numbers = re.findall(r"-?\d+(?:,\d{3})*(?:\.\d+)?", text)
     if numbers:
         try:
-            return float(numbers[-1].replace(",", "")) * multiplier
+            # Remove commas and convert the last number found
+            return float(numbers[-1].replace(",", ""))
         except ValueError:
             return None
 
