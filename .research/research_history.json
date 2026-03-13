@@ -309,5 +309,87 @@
     "experimental_code": "import re\nfrom collections import Counter\n\ndef parse_last_number(text):\n    nums = re.findall(r\"[-+]?\\d+(?:\\.\\d+)?\", text.replace(',', ''))\n    return nums[-1] if nums else None\n\ndef word_len(text):\n    return len(text.split())\n\ndef majority_vote(cands):\n    ans = [parse_last_number(c[\"text\"]) for c in cands]\n    ans = [a for a in ans if a is not None]\n    return Counter(ans).most_common(1)[0][0] if ans else None\n\ndef build_candidate_prompt(q):\n    return (\n        \"Solve the problem. Use the format:\\n\"\n        \"PLAN: (max 3 bullets)\\n\"\n        \"EXECUTE: (max 6 short lines)\\n\"\n        \"COMMIT: final answer as a single number.\\n\\n\"\n        f\"Problem: {q}\\n\"\n    )\n\ndef build_probe_prompt(q, cand_text, probe_type):\n    # Candidate-conditioned counterfactual check; force short verdict.\n    probe_instructions = {\n        \"recompute\": \"Recompute the solution using a different order of operations. \",\n        \"plugback\": \"Check by plugging the committed answer back into the conditions. \",\n        \"bounds\": \"Check reasonableness with quick bounds/estimates (no full redo). \",\n    }[probe_type]\n\n    return (\n        \"You are verifying a proposed solution. Be brief (<=80 words).\\n\"\n        f\"Problem: {q}\\n\\n\"\n        \"Proposed solution (do not extend it):\\n\"\n        f\"{cand_text}\\n\\n\"\n        + probe_instructions +\n        \"Output exactly:\\n\"\n        \"VERDICT: PASS or FAIL\\n\"\n        \"ANSWER: <single number (repeat committed if PASS; corrected if FAIL)>\\n\"\n    )\n\ndef parse_probe(probe_text):\n    verdict_m = re.search(r\"VERDICT\\s*:\\s*(PASS|FAIL)\", probe_text, re.I)\n    verdict = verdict_m.group(1).upper() if verdict_m else \"FAIL\"\n    ans_m = re.search(r\"ANSWER\\s*:\\s*([-+]?\\d+(?:\\.\\d+)?)\", probe_text.replace(',', ''))\n    ans = ans_m.group(1) if ans_m else None\n    return verdict, ans\n\ndef ccr_rerank(question, candidates, probe_sampler, alpha=0.5, beta=0.002, M=3):\n    probe_types = [\"recompute\", \"plugback\", \"bounds\"][:M]\n\n    scored = []\n    for c in candidates:\n        base_ans = parse_last_number(c[\"text\"])\n        if base_ans is None:\n            scored.append((-1e9, c))\n            continue\n\n        pass_ct, stable_ct = 0, 0\n        for pt in probe_types:\n            pr = probe_sampler(build_probe_prompt(question, c[\"text\"], pt))\n            verdict, ans = parse_probe(pr)\n            pass_ct += int(verdict == \"PASS\")\n            stable_ct += int(ans == base_ans)\n\n        pass_rate = pass_ct / len(probe_types)\n        stability = stable_ct / len(probe_types)\n        brev_pen = word_len(c[\"text\"])\n        score = pass_rate + alpha * stability - beta * brev_pen\n        scored.append((score, c))\n\n    scored.sort(key=lambda x: x[0], reverse=True)\n    return scored[0][1]\n\n# Usage skeleton (you provide sample_llm and probe_llm; can be same model):\n# K=5\n# for item in dataset:\n#     q=item[\"question\"]\n#     cands=[{\"text\": sample_llm(build_candidate_prompt(q), temp=0.7)} for _ in range(K)]\n#     pred_sc = majority_vote(cands)\n#     best = ccr_rerank(q, cands, probe_sampler=lambda p: sample_llm(p, temp=0.0))\n#     pred_ccr = parse_last_number(best[\"text\"])",
     "expected_result": "On GSM8K(200):\n- Zero-shot CoT (B): ~0.55 accuracy.\n- Self-Consistency majority vote (C, K=5): ~0.60.\n- Confidence best-of-N (D): ~0.58–0.61 (often noisy).\n- Proposed CCR-CoT (E, K=5, M=3 short probes): ~0.64–0.67.\nSecondary expectations:\n- Average candidate rationale length decreases 10–25% due to strict format; probes add overhead but are short.\n- Gains persist on SVAMP/ASDiv with smaller uplift (+2–4 pts over majority vote), indicating generality.\nHigher accuracy is better; compute cost increases vs (C) but remains prompt-only and tunable via K,M.",
     "expected_conclusion": "Counterfactual Consistency Re-ranking provides a prompt-only, model-agnostic way to *measure and exploit robustness of a specific rationale* via brief, human-like stress tests (recompute/plug-back/bounds). This increases novelty and significance by replacing fragile self-reported confidence and heuristic verification cues with an empirically testable consistency signal, yielding better answer accuracy and more reliable selection without fine-tuning or external verifiers. The method is academically valuable (connects CoT selection to robustness/counterfactual checking) and socially valuable (more trustworthy reasoning with controllable compute), and it is feasible to validate end-to-end with a small Python script and API calls."
+  },
+  "experimental_design": {
+    "experiment_summary": "Goal: improve **final-answer accuracy** on grade-school math word problems by selecting a more reliable answer from multiple prompt-only Chain-of-Thought (CoT) candidates.\n\nTask the model must do: for each GSM8K question, generate candidate solution traces and a single numeric final answer, then (for the proposed method) perform short, structured **counterfactual verification probes** on each candidate to detect internal inconsistency and re-rank candidates.\n\nWorkflow (per question):\n1) Sample K candidate solutions with a strict template (PLAN→EXECUTE→COMMIT).\n2) For each candidate, run M short verification probes (recompute/plug-back/bounds) conditioned on that candidate, each outputting VERDICT {PASS/FAIL} and a single numeric ANSWER.\n3) Compute text-only reliability features: pass_rate, answer_stability, brevity_penalty; combine into a scalar score.\n4) Pick the candidate with max score; if all scores below a threshold, fall back to majority vote.\n\nBaselines: (i) Self-Consistency majority vote over K candidates (prompt-only). This isolates the effect of *intra-sample robustness* vs inter-sample voting.\n\nScale to fit the Runner environment: inference-only prompting + lightweight Python. Use **GSM8K test first 200 examples**; K=5 candidates; M=3 probes/candidate; probes constrained to <=80 words. Total calls ≈ 200*(K + K*M)=200*20=4,000 generations (short probes), feasible for a single API model; optional cost reductions include M=1 ablation and early-stop after 2 PASS probes.",
+    "compute_environment": {},
+    "evaluation_metrics": [
+      {
+        "name": "accuracy",
+        "description": "**Correctness criteria:** A prediction is correct if the model’s final numeric answer matches the ground-truth GSM8K answer after normalization.\n- Extract the **last number** in the model output (or in COMMIT/ANSWER line) using regex on de-comma’d text: `[-+]?\\d+(?:\\.\\d+)?`.\n- Normalize by casting to Decimal/float; compare with exact match for integers; for decimals allow tolerance `abs(pred-gold) <= 1e-6` (handles harmless formatting).\n\n**Calculation method:**\n- For N questions: `accuracy = (1/N) * sum_{j=1..N} 1[pred_j == gold_j]` under the above numeric match.\n\n**Task appropriateness:** GSM8K is single-answer arithmetic reasoning; the end goal is the numeric result, so accuracy directly reflects success.\n\n**Relevant visualizations:**\n- Bar chart of accuracy with 95% bootstrap CIs across methods.\n- Histogram of errors (pred-gold) for non-integer cases (should be near zero; highlights systematic bias)."
+      },
+      {
+        "name": "avg_tokens_per_question",
+        "description": "**Correctness criteria:** Not a correctness metric; measures inference cost.\n\n**Calculation method:**\n- Track `usage.total_tokens` (or approximate by counting whitespace-delimited tokens if API usage unavailable).\n- `avg_tokens_per_question = (sum total_tokens over all model calls) / N`.\n- Report also **breakdown**: candidate-generation tokens vs probe tokens.\n\n**Task appropriateness:** Proposed method trades extra short probes for better selection; this metric quantifies compute overhead and enables efficiency comparisons.\n\n**Relevant visualizations:**\n- Stacked bar chart: tokens/question split into (candidates, probes).\n- Scatter plot: per-question tokens vs correctness (to see if hard items consume more tokens)."
+      },
+      {
+        "name": "selective_accuracy_at_coverage",
+        "description": "**Correctness criteria:** Same as `accuracy`, but only on a subset of questions selected by a reliability score.\n\n**Calculation method:**\n- For CCR-CoT, define per-question reliability as the chosen candidate’s `score_i`.\n- For coverage c (e.g., 50%, 70%, 90%), keep top `ceil(c*N)` questions by reliability.\n- `selective_accuracy(c) = correct_on_selected / selected_count`.\n\n**Task appropriateness:** If CCR scores reflect reliability, it should be able to abstain/triage: higher accuracy on high-score subset indicates the score is meaningful.\n\n**Relevant visualizations:**\n- Selective accuracy vs coverage curve (risk–coverage plot).\n- Reliability-score distribution for correct vs incorrect predictions (overlaid densities)."
+      }
+    ],
+    "models_to_use": [
+      "gemini-2.5-flash (~unknown params)"
+    ],
+    "datasets_to_use": [
+      "GSM8K"
+    ],
+    "proposed_method": {
+      "method_name": "CCR-CoT (Counterfactual Consistency Re-ranking)",
+      "description": "Inference-only prompt protocol: sample K structured CoT candidates (PLAN/EXECUTE/COMMIT), then run M short candidate-conditioned counterfactual verification probes (recompute, plug-back, bounds). Compute a consistency score = pass_rate + α·answer_stability − β·brevity_penalty and select the max-scoring candidate; fallback to majority vote if all scores low. Novelty: uses **intra-sample robustness under prompt perturbations** as a reliability signal without external verifiers or fine-tuning.",
+      "optuna_config": {
+        "enabled": true,
+        "n_trials": 20,
+        "search_spaces": [
+          {
+            "param_name": "alpha",
+            "distribution_type": "uniform",
+            "low": 0.0,
+            "high": 1.0
+          },
+          {
+            "param_name": "beta",
+            "distribution_type": "loguniform",
+            "low": 0.0001,
+            "high": 0.01
+          },
+          {
+            "param_name": "M",
+            "distribution_type": "int",
+            "low": 1.0,
+            "high": 5.0
+          },
+          {
+            "param_name": "low_score_fallback_threshold",
+            "distribution_type": "uniform",
+            "low": -0.2,
+            "high": 0.8
+          }
+        ]
+      }
+    },
+    "comparative_methods": [
+      {
+        "method_name": "Self-Consistency CoT (Majority Vote, K=5)",
+        "description": "Prompt-only baseline: sample K independent CoT solutions with the same PLAN/EXECUTE/COMMIT template; parse each final numeric answer; choose the majority-vote answer (ties broken by first occurrence). No candidate-conditioned verification probes; relies purely on inter-sample agreement.",
+        "optuna_config": {
+          "enabled": true,
+          "n_trials": 20,
+          "search_spaces": [
+            {
+              "param_name": "K",
+              "distribution_type": "int",
+              "low": 3.0,
+              "high": 9.0
+            },
+            {
+              "param_name": "temperature",
+              "distribution_type": "uniform",
+              "low": 0.3,
+              "high": 1.0
+            }
+          ]
+        }
+      }
+    ]
   }
 }
