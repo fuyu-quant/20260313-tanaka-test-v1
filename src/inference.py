@@ -92,12 +92,27 @@ def run_inference(cfg: DictConfig) -> Dict[str, Any]:
 
     # Initialize model
     print("Initializing model...")
+    # [VALIDATOR FIX - Attempt 2]
+    # [PROBLEM]: OpenAI API returns JSON parsing errors intermittently
+    # [CAUSE]: OmegaConf values (from Hydra) are not pure Python types and may not serialize correctly to JSON
+    # [FIX]: Explicitly convert OmegaConf values to native Python types before passing to API
+    #
+    # [OLD CODE]:
+    # model = LLMModel(
+    #     provider=cfg.run.model.provider,
+    #     model_name=cfg.run.model.name,
+    #     api_key_env=cfg.run.model.api_key_env,
+    #     temperature=cfg.run.model.temperature,
+    #     max_tokens=cfg.run.model.max_tokens,
+    # )
+    #
+    # [NEW CODE]:
     model = LLMModel(
-        provider=cfg.run.model.provider,
-        model_name=cfg.run.model.name,
-        api_key_env=cfg.run.model.api_key_env,
-        temperature=cfg.run.model.temperature,
-        max_tokens=cfg.run.model.max_tokens,
+        provider=str(cfg.run.model.provider),
+        model_name=str(cfg.run.model.name),
+        api_key_env=str(cfg.run.model.api_key_env),
+        temperature=float(cfg.run.model.temperature),
+        max_tokens=int(cfg.run.model.max_tokens),
     )
 
     # Run inference based on method

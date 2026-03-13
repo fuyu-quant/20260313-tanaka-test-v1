@@ -70,14 +70,28 @@ class LLMModel:
         max_retries = 3
         retry_delay = 2
 
+        # [VALIDATOR FIX - Attempt 2]
+        # [PROBLEM]: OpenAI API returns JSON parsing errors - "could not parse the JSON body"
+        # [CAUSE]: Parameters may not be native Python types (e.g., OmegaConf values), causing JSON serialization issues
+        # [FIX]: Ensure all API parameters are native Python types before API call
+        #
+        # [OLD CODE]:
+        # (no type conversion)
+        #
+        # [NEW CODE]:
+        # Convert parameters to native Python types to ensure JSON serialization works
+        temperature_native = float(temperature)
+        max_tokens_native = int(max_tokens)
+        n_native = int(n)
+
         for attempt in range(max_retries):
             try:
                 response = self.client.chat.completions.create(
                     model=self.model_name,
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    n=n,
+                    messages=[{"role": "user", "content": str(prompt)}],
+                    temperature=temperature_native,
+                    max_tokens=max_tokens_native,
+                    n=n_native,
                 )
 
                 # Extract completions
