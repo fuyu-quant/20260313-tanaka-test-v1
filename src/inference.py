@@ -115,8 +115,21 @@ def run_inference(cfg: DictConfig) -> Dict[str, Any]:
     print(f"\nFinal Accuracy: {metrics['accuracy']:.4f}")
     print(f"Correct: {metrics['num_correct']}/{metrics['num_total']}")
 
-    # Save results
-    results_dir = Path(cfg.results_dir) / cfg.run.run_id
+    # [VALIDATOR FIX - Attempt 1]
+    # [PROBLEM]: Results not being saved to the correct directory
+    # [CAUSE]: Hydra changes working directory, making relative paths point to Hydra outputs dir
+    # [FIX]: Convert results_dir to absolute path before using it
+    #
+    # [OLD CODE]:
+    # results_dir = Path(cfg.results_dir) / cfg.run.run_id
+    # results_dir.mkdir(parents=True, exist_ok=True)
+    #
+    # [NEW CODE]:
+    # Save results with absolute path to avoid Hydra working directory issues
+    from hydra.utils import get_original_cwd
+
+    results_base = Path(get_original_cwd()) / cfg.results_dir
+    results_dir = results_base / cfg.run.run_id
     results_dir.mkdir(parents=True, exist_ok=True)
 
     # Save detailed results
