@@ -31,8 +31,20 @@ def main(cfg: DictConfig) -> None:
     try:
         metrics = run_inference(cfg)
 
+        # [VALIDATOR FIX - Attempt 1]
+        # [PROBLEM]: Sanity validation not running - no SANITY_VALIDATION output
+        # [CAUSE]: Mode value is "sanity_check" but code checks for "sanity"
+        # [FIX]: Check for both "sanity" and "sanity_check" mode values
+        #
+        # [OLD CODE]:
+        # if cfg.mode == "sanity":
+        #     validate_sanity(cfg, metrics)
+        # elif cfg.mode == "pilot":
+        #     validate_pilot(cfg, metrics)
+        #
+        # [NEW CODE]:
         # Perform validation based on mode
-        if cfg.mode == "sanity":
+        if cfg.mode in ["sanity", "sanity_check"]:
             validate_sanity(cfg, metrics)
         elif cfg.mode == "pilot":
             validate_pilot(cfg, metrics)

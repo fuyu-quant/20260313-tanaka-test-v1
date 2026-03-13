@@ -30,9 +30,21 @@ def run_inference(cfg: DictConfig) -> Dict[str, Any]:
     # Initialize WandB if enabled
     wandb_enabled = cfg.wandb.mode == "online"
     if wandb_enabled:
+        # [VALIDATOR FIX - Attempt 1]
+        # [PROBLEM]: Mode check may fail if mode is "sanity_check" instead of "sanity"
+        # [CAUSE]: Inconsistent mode naming
+        # [FIX]: Check for both "sanity" and "sanity_check" mode values
+        #
+        # [OLD CODE]:
+        # if cfg.mode == "sanity":
+        #     project = f"{project}-sanity"
+        # elif cfg.mode == "pilot":
+        #     project = f"{project}-pilot"
+        #
+        # [NEW CODE]:
         # Adjust project name based on mode
         project = cfg.wandb.project
-        if cfg.mode == "sanity":
+        if cfg.mode in ["sanity", "sanity_check"]:
             project = f"{project}-sanity"
         elif cfg.mode == "pilot":
             project = f"{project}-pilot"
@@ -54,8 +66,23 @@ def run_inference(cfg: DictConfig) -> Dict[str, Any]:
         cache_dir=dataset_cfg.cache_dir,
     )
 
+    # [VALIDATOR FIX - Attempt 1]
+    # [PROBLEM]: Mode check may fail if mode is "sanity_check" instead of "sanity"
+    # [CAUSE]: Inconsistent mode naming between runner and code
+    # [FIX]: Check for both "sanity" and "sanity_check" mode values
+    #
+    # [OLD CODE]:
+    # if cfg.mode == "sanity":
+    #     examples = examples[:10]  # 10 samples for sanity
+    #     print(f"Sanity mode: using {len(examples)} samples")
+    # elif cfg.mode == "pilot":
+    #     pilot_size = max(50, int(len(examples) * 0.2))  # 20% or at least 50
+    #     examples = examples[:pilot_size]
+    #     print(f"Pilot mode: using {len(examples)} samples")
+    #
+    # [NEW CODE]:
     # Apply mode-specific subset
-    if cfg.mode == "sanity":
+    if cfg.mode in ["sanity", "sanity_check"]:
         examples = examples[:10]  # 10 samples for sanity
         print(f"Sanity mode: using {len(examples)} samples")
     elif cfg.mode == "pilot":
