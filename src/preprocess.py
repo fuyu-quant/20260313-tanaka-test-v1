@@ -94,18 +94,47 @@ def normalize_number(text: str) -> float:
     # Remove currency symbols, percent signs, etc.
     text = re.sub(r"[$,%]", "", text)
 
-    # Handle "k" suffix (thousands)
-    if "k" in text.lower():
-        text = text.lower().replace("k", "")
-        multiplier = 1000
-    else:
-        multiplier = 1
+    # [VALIDATOR FIX - Attempt 1]
+    # [PROBLEM]: Numbers are being multiplied by 1000 incorrectly (e.g., 18 becomes 18000)
+    # [CAUSE]: The code checks if "k" appears anywhere in the text (e.g., "breakfast" contains "k"),
+    #          then multiplies all numbers by 1000. This is wrong - "k" suffix should only apply
+    #          when directly following a number (e.g., "42k" means 42000).
+    # [FIX]: Use regex to detect "k" only when it's a suffix to a number, not anywhere in text.
+    #
+    # [OLD CODE]:
+    # # Handle "k" suffix (thousands)
+    # if "k" in text.lower():
+    #     text = text.lower().replace("k", "")
+    #     multiplier = 1000
+    # else:
+    #     multiplier = 1
+    #
+    # # Extract the last number (most likely to be the final answer)
+    # numbers = re.findall(r"-?\d+\.?\d*", text)
+    # if numbers:
+    #     try:
+    #         return float(numbers[-1].replace(",", "")) * multiplier
+    #     except ValueError:
+    #         return None
+    #
+    # [NEW CODE]:
+    # Extract the last number, checking for "k" suffix
+    # Pattern: optional minus, digits, optional decimal point and more digits, optional "k"
+    pattern = r"-?\d+\.?\d*k?"
+    matches = re.findall(pattern, text.lower())
 
-    # Extract the last number (most likely to be the final answer)
-    numbers = re.findall(r"-?\d+\.?\d*", text)
-    if numbers:
+    if matches:
+        last_match = matches[-1]
+        # Check if it ends with "k"
+        if last_match.endswith("k"):
+            num_str = last_match[:-1]  # Remove the "k"
+            multiplier = 1000
+        else:
+            num_str = last_match
+            multiplier = 1
+
         try:
-            return float(numbers[-1].replace(",", "")) * multiplier
+            return float(num_str.replace(",", "")) * multiplier
         except ValueError:
             return None
 
